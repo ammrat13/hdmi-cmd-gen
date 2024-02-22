@@ -2,15 +2,16 @@
 #include "coordinate.hpp"
 
 #include "ap_axi_sdata.h"
+#include "hls_burst_maxi.h"
 #include "hls_stream.h"
 
 void top(
-  //uint32_t framebuffer[],
+  hls::burst_maxi<uint32_t> framebuffer,
   volatile hdmi::RawCoordinate &current_raw_coordinate,
   hls::stream<hdmi::RawCommandPacket> &commands
 ) {
 #pragma HLS INTERFACE mode=s_axilite port=return
-//#pragma HLS INTERFACE mode=m_axi port=framebuffer offset=slave
+#pragma HLS INTERFACE mode=m_axi port=framebuffer offset=slave
 #pragma HLS INTERFACE mode=s_axilite port=current_raw_coordinate
 #pragma HLS INTERFACE mode=axis port=commands
 
@@ -19,12 +20,14 @@ void top(
   static ap_uint<12> fid = 0u;
   fid++;
 
-  // Keep track of the current row and column, as well as the total pixel count.
-  // The active region is generally taken to be in the top-left corner, and we
-  // follow that convention.
+  // Keep track of the current row and column. The active region is generally
+  // taken to be in the top-left corner, and we follow that convention.
   ap_uint<10> row;
   ap_uint<10> col;
-  //ap_uint<19> px = 0u;
+
+  // Set up the burst. We know the screen size, and we read each pixel once, so
+  // burst for that many words.
+  framebuffer.read_request(0u, 640u * 480u);
 
   // Iterate over the active rows. Each row is split into an active region and a
   // blanking interval.
@@ -35,8 +38,10 @@ void top(
     #pragma HLS PIPELINE II=1
       current_raw_coordinate = hdmi::Coordinate{fid, row, col}.raw();
 
-      // Just push out the color blue for now. Remember to set data active.
-      commands.write(hdmi::RawCommandPacket { .data = 0x0000ffu | 0x04000000u });
+      // Read the color from the framebuffer, then push it out. Remember to set
+      // the data active too.
+      ap_uint<32> color_data = framebuffer.read() & 0xffffffu;
+      commands.write(hdmi::RawCommandPacket { .data = color_data | 0x04000000u });
     }
 
     // Horizontal blanking interval
