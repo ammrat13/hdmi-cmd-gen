@@ -1,0 +1,9 @@
+# Ignore build outputs
+compile_commands.json
+
+# Ignore synthesis outputs
+.Xil/
+top/
+
+# Ignore caches
+.cache/
