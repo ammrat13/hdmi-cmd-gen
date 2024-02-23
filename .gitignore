@@ -1,5 +1,6 @@
 # Ignore build outputs
 compile_commands.json
+_ide/
 
 # Ignore synthesis outputs
 .Xil/

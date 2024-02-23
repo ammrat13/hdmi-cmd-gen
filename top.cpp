@@ -1,3 +1,4 @@
+#include "color.hpp"
 #include "command.hpp"
 #include "coordinate.hpp"
 
@@ -5,8 +6,28 @@
 #include "hls_burst_maxi.h"
 #include "hls_stream.h"
 
+//! \brief Entrypoint of the peripheral
+//!
+//! The peripheral can be configured over the AXI4-Lite interface. It's intended
+//! to be run in continuous mode, with each run producing the commands for one
+//! frame of video. The commands start immediately with active video, with the
+//! horizontal/vertical blanking intervals being on the right/bottom edges of
+//! the screen.
+//!
+//! The framebuffer register is copied to the device on start, so you have to
+//! wait until the end of the frame to free the buffer.
+//!
+//! Also, the current raw coordinate only goes valid once we start rasterizing,
+//! which doesn't happen for 20 or so bus cycles. Make sure to wait for the data
+//! to go valid before trusting it, and make sure to clear the valid bit from
+//! the last run if needed.
+//!
+//! \param[in] framebuffer The physical address to read pixels from
+//! \param[out] current_raw_coordinate An encoded representation of where we are
+//!                                    currently rasterizing
+//! \param[out] commands The HDMI commands to draw the screen
 void top(
-  hls::burst_maxi<uint32_t> framebuffer,
+  hls::burst_maxi<hdmi::RawColor> framebuffer,
   volatile hdmi::RawCoordinate &current_raw_coordinate,
   hls::stream<hdmi::RawCommandPacket> &commands
 ) {
@@ -20,60 +41,43 @@ void top(
   static ap_uint<12> fid = 0u;
   fid++;
 
-  // Keep track of the current row and column. The active region is generally
-  // taken to be in the top-left corner, and we follow that convention.
-  ap_uint<10> row;
-  ap_uint<10> col;
-
   // Set up the burst. We know the screen size, and we read each pixel once, so
   // burst for that many words.
   framebuffer.read_request(0u, 640u * 480u);
 
-  // Iterate over the active rows. Each row is split into an active region and a
-  // blanking interval.
-  VACTIVE_ROWS: for (row = 0u; row < 480u; row++) {
+  // Use this encoder to generate commands. We need a single encoder because we
+  // need to persist state between pixels.
+  hdmi::CommandEncoder encoder;
 
-    // Active region
-    HACTIVE_COLS: for (col = 0u; col < 640u; col++) {
-    #pragma HLS PIPELINE II=1
-      current_raw_coordinate = hdmi::Coordinate{fid, row, col}.raw();
-
-      // Read the color from the framebuffer, then push it out. Remember to set
-      // the data active too.
-      ap_uint<32> color_data = framebuffer.read() & 0xffffffu;
-      commands.write(hdmi::RawCommandPacket { .data = color_data | 0x04000000u });
-    }
-
-    // Horizontal blanking interval
-    HBLANK_COLS: for (col = 640u; col < 800u; col++) {
-    #pragma HLS PIPELINE II=1
-      current_raw_coordinate = hdmi::Coordinate{fid, row, col}.raw();
-
-      // Compute whether we should output HSYNC. This might be true since we're
-      // in the horizontal blanking interval.
-      bool hsync = col >= 656u && col < 752u;
-
-      // Signal with the sync
-      commands.write(hdmi::RawCommandPacket { .data = (hsync ? 0x02000000u : 0u) });
-    }
-  }
-
-  // Finally, handle the blanking interval. All the columns are blanked here, so
-  // there's no need to split up the inner loop.
-  VBLANK_ROWS: for (row = 480u; row < 525u; row++) {
-    VBLANK_COLS: for (col = 0u; col < 800u; col++) {
+  // Iterate over the rows and columns. The active region is in the top-left
+  // corner, as is convention.
+  ROWS: for (ap_uint<10> row = 0u; row < 525u; row++) {
+    COLS: for (ap_uint<10> col = 0u; col < 800u; col++) {
     #pragma HLS LOOP_FLATTEN
     #pragma HLS PIPELINE II=1
+
+      // Send the current coordinate back
       current_raw_coordinate = hdmi::Coordinate{fid, row, col}.raw();
 
-      // Compute both the horizontal and verital sync pulses. We could be in the
-      // blanking interval for both, so we have to check if we're in the sync
-      // interval.
+      // Compute whether we are in the active region, as well as the sync pulses
+      // during the blanking interval.
+      bool de = col < 640u && row < 480u;
       bool hsync = col >= 656u && col < 752u;
       bool vsync = row >= 490u && row < 492u;
 
-      // Signal with the syncs
-      commands.write(hdmi::RawCommandPacket { .data = (hsync ? 0x02000000u : 0u) | (vsync ? 0x01000000u : 0u) });
+      // Compute the output packet
+      hdmi::RawCommandPacket packet;
+      if (de) {
+        // If we're in the active region, read a pixel
+        hdmi::Color color{framebuffer.read()};
+        packet = encoder.encode_active(color);
+      } else {
+        // Otherwise, send sync pulses as needed
+        packet = encoder.encode_blanking(hsync, vsync);
+      }
+
+      // Write the packet
+      commands.write(packet);
     }
   }
 }

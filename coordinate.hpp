@@ -20,16 +20,15 @@ using RawCoordinate = ap_uint<32>;
 //! Again, coordinates contain data not only asbout where we are in the current
 //! frame, but also the relative frame ID. The frame ID doesn't start at zero,
 //! so only offsets are meaningful.
+//!
+//! This struct is designed to be converted into RawCoordinates. The idea is
+//! that we instantiate the struct with all the fields, then use the raw method
+//! to convert.
 struct Coordinate {
   ap_uint<12> frame_id;
   ap_uint<10> row;
   ap_uint<10> col;
 
-  //! \brief Forward struct fields
-  Coordinate(ap_uint<12> frame_id, ap_uint<10> row, ap_uint<10> col)
-    : frame_id(frame_id), row(row), col(col) {}
-
-  //! \brief Convert to the raw version
   RawCoordinate raw() const {
     return (this->frame_id, this->row, this->col);
   }
