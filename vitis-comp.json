@@ -6,7 +6,7 @@
     "configFiles": [
       "hls_config.cfg"
     ],
-    "work_dir": "top"
+    "work_dir": "build"
   },
   "previousBuildStatusMap": {}
 }

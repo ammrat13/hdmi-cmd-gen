@@ -4,7 +4,7 @@ _ide/
 
 # Ignore synthesis outputs
 .Xil/
-top/
+build/
 
 # Ignore caches
 .cache/
