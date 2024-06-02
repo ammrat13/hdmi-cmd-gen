@@ -49,8 +49,8 @@ void top(
   // need to persist state between pixels.
   hdmi::CommandEncoder encoder;
 
-  // Iterate over the rows and columns. The active region is in the top-left
-  // corner, as is convention.
+  // Iterate over the rows and columns. The active region is in the bottom-right
+  // so that the interrupt fires when we enter the blanking interval.
   ROWS: for (ap_uint<10> row = 0u; row < 525u; row++) {
     COLS: for (ap_uint<10> col = 0u; col < 800u; col++) {
     #pragma HLS LOOP_FLATTEN
@@ -61,9 +61,9 @@ void top(
 
       // Compute whether we are in the active region, as well as the sync pulses
       // during the blanking interval.
-      bool de = col < 640u && row < 480u;
-      bool hsync = col >= 656u && col < 752u;
-      bool vsync = row >= 490u && row < 492u;
+      bool de = col >= 160u && row >= 45u;
+      bool hsync = col >= 16u && col < 112u;
+      bool vsync = row >= 10u && row < 12u;
 
       // Compute the output packet
       hdmi::RawCommandPacket packet;
